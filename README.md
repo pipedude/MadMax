@@ -167,6 +167,7 @@ python main.py
 ```
 
 **Requirements:**
+- Linux
 - Python 3.11+
 - Microphone and speakers
 - Google AI Studio API Key
