@@ -156,9 +156,7 @@ source venv/bin/activate
 pip install -r requirements.txt
 
 # 4. Download wake-word model (~40 MB)
-wget https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip
-unzip vosk-model-small-en-us-0.15.zip
-mv vosk-model-small-en-us-0.15 model_en
+./setup.sh
 
 # 5. Configure environment
 # Create .env file (or export variables):
