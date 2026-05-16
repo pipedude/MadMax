@@ -24,7 +24,7 @@ async def main():
         vosk_model = Model(VOSK_MODEL_PATH)
     except (OSError, RuntimeError, ValueError) as exc:
         raise WakeWordModelError(
-            f"Failed to load Vosk model from '{VOSK_MODEL_PATH}'. Download vosk-model-small-ru-0.22, extract and rename the folder to 'model_ru'."
+            f"Failed to load Vosk model from '{VOSK_MODEL_PATH}'. Run ./setup.sh or download vosk-model-small-en-us-0.15, extract and rename the folder to '{VOSK_MODEL_PATH}'."
         ) from exc
 
     loop = asyncio.get_running_loop()
