@@ -1,0 +1,42 @@
+venv/
+__pycache__/
+.env
+*.pyc
+model_ru/
+model_en/
+to_do.md
+help.md
+agent_instructions_old.md
+gemini_docs/
+live_api_docs/
+
+# Backup files
+*.bak
+*.bak.*
+
+# Duplicate requirements
+memory_engine/requirements.txt
+
+# Test artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+dist/
+build/
+test_*.py
+
+# Agent runtime data & memory outputs
+memory_engine/memory/*.json
+memory_engine/memory/*.bak
+memory_engine/memory/*.jsonl
+memory_engine/active_context.json
+memory_engine/daily/*.md
+memory_engine/tmp_*
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~

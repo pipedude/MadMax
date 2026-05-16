@@ -1,0 +1,5 @@
+websockets==16.0
+PyAudio==0.2.14
+python-dotenv==1.0.1
+vosk==0.3.45
+google-genai==1.73.1
