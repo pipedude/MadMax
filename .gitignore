@@ -17,6 +17,9 @@ live_api_docs/
 # Duplicate requirements
 memory_engine/requirements.txt
 
+# Blog drafts
+blog_*.md
+
 # Test artifacts
 .pytest_cache/
 .coverage
