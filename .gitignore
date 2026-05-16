@@ -3,6 +3,7 @@ __pycache__/
 .env
 *.pyc
 model_ru/
+model_en/
 to_do.md
 help.md
 agent_instructions_old.md
