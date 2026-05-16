@@ -101,9 +101,9 @@ Directory `memory_engine/memory/`:
 
 ## ⚙️ Configuration
 
-Google AI Studio API Key in `.env`
-Key parameters in `config.py`
-Memory settings in `memory_config.py`
+- Google AI Studio API Key in `.env`
+- Key parameters in `config.py`
+- Memory settings in `memory_config.py`
 
 ---
 
