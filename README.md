@@ -155,11 +155,16 @@ source venv/bin/activate
 # 3. Install dependencies
 pip install -r requirements.txt
 
-# 4. Configure environment
+# 4. Download wake-word model (~40 MB)
+wget https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip
+unzip vosk-model-small-en-us-0.15.zip
+mv vosk-model-small-en-us-0.15 model_en
+
+# 5. Configure environment
 # Create .env file (or export variables):
 # GOOGLE_API_KEY=your_key_here
 
-# 5. Run the agent
+# 6. Run the agent
 python main.py
 ```
 
