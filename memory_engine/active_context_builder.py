@@ -313,6 +313,28 @@ def load_existing_active_context() -> dict[str, Any]:
     return json.loads(OUTPUT_JSON_PATH.read_text(encoding="utf-8"))
 
 
+def _pretty_list_of_dicts(items: list[Any], field_order: list[str]) -> list[str]:
+    """Formats a list of dicts into readable lines like:
+       - key1: val1 | key2: val2
+    Unknown fields are appended after known ones."""
+    out: list[str] = []
+    for item in items:
+        if not isinstance(item, dict):
+            out.append(f"  - {item}")
+            continue
+        parts = []
+        for key in field_order:
+            val = item.get(key)
+            if val is not None and val != "":
+                parts.append(f"{key}: {val}")
+        for key, val in item.items():
+            if key not in field_order and val is not None and val != "":
+                parts.append(f"{key}: {val}")
+        if parts:
+            out.append("  - " + " | ".join(parts))
+    return out
+
+
 def build_compact_injection_context(context_data: dict[str, Any]) -> str:
     """Builds a compact representation of the active context for injection into the system prompt.
     Includes only meaningful fields, excluding service metadata."""
@@ -339,6 +361,15 @@ def build_compact_injection_context(context_data: dict[str, Any]) -> str:
         lines.append(str(summary_today))
         lines.append("")
 
+    reply_count_today = context_data.get("reply_count_today")
+    if reply_count_today is not None:
+        lines.append(f"Reply Count Today: {reply_count_today}")
+    summary_reply_count = context_data.get("summary_reply_count")
+    if summary_reply_count is not None:
+        lines.append(f"Summary Reply Count: {summary_reply_count}")
+    if reply_count_today is not None or summary_reply_count is not None:
+        lines.append("")
+
     last_context = context_data.get("last_context", [])
     if isinstance(last_context, list) and last_context:
         lines.append("--- Recent Context ---")
@@ -347,13 +378,15 @@ def build_compact_injection_context(context_data: dict[str, Any]) -> str:
                 continue
             session_id = session.get("session_id", "unknown")
             started_at = session.get("started_at", "")
-            replies = session.get("replies", [])
-            lines.append(f"Session {session_id} ({started_at}):")
-            if isinstance(replies, list):
-                for reply in replies:
-                    if isinstance(reply, dict):
-                        speaker = reply.get("speaker", "?")
-                        text = reply.get("text", "")
+            ended_at = session.get("ended_at", "")
+            time_range = f"{started_at} → {ended_at}" if ended_at else started_at
+            lines.append(f"Session {session_id} ({time_range}):")
+            dialog = session.get("dialog", [])
+            if isinstance(dialog, list):
+                for msg in dialog:
+                    if isinstance(msg, dict):
+                        speaker = msg.get("speaker", "?")
+                        text = msg.get("text", "")
                         lines.append(f"  {speaker}: {text}")
             lines.append("")
 
@@ -382,36 +415,17 @@ def build_compact_injection_context(context_data: dict[str, Any]) -> str:
         agenda = injections.get("agenda", [])
         if isinstance(agenda, list) and agenda:
             lines.append("Agenda:")
-            for item in agenda:
-                if isinstance(item, dict):
-                    desc = item.get("description", "")
-                    due = item.get("due_at", "")
-                    due_str = f" (due: {due})" if due else ""
-                    if desc:
-                        lines.append(f"  - {desc}{due_str}")
+            lines.extend(_pretty_list_of_dicts(agenda, ["description", "due_at"]))
+            lines.append("")
 
         experience = injections.get("experience", [])
         if isinstance(experience, list) and experience:
             lines.append("Experience:")
-            for exp in experience:
-                if isinstance(exp, dict):
-                    action = exp.get("action", "")
-                    obj = exp.get("object", "")
-                    reason = exp.get("reason", "")
-                    effect = exp.get("effect", "")
-                    place_name = exp.get("place_name", "")
-                    parts = [p for p in [action, obj] if p]
-                    if parts:
-                        base = " ".join(parts)
-                        suffix_parts = []
-                        if place_name:
-                            suffix_parts.append(f"in {place_name}")
-                        if reason:
-                            suffix_parts.append(f"reason: {reason}")
-                        if effect:
-                            suffix_parts.append(f"effect: {effect}")
-                        suffix = f" ({', '.join(suffix_parts)})" if suffix_parts else ""
-                        lines.append(f"  - {base}{suffix}")
+            lines.extend(_pretty_list_of_dicts(
+                experience,
+                ["action", "object", "place_name", "reason", "effect", "confidence"]
+            ))
+            lines.append("")
 
         episodes = injections.get("episodes", [])
         if isinstance(episodes, list) and episodes:
@@ -423,7 +437,29 @@ def build_compact_injection_context(context_data: dict[str, Any]) -> str:
                     if summary:
                         prefix = f"[{time}] " if time else ""
                         lines.append(f"  - {prefix}{summary}")
-        lines.append("")
+            lines.append("")
+
+        known_keys = {"persona", "agenda", "experience", "episodes"}
+        for key, value in injections.items():
+            if key in known_keys:
+                continue
+            if isinstance(value, list) and value:
+                lines.append(f"{key.replace('_', ' ').title()}:")
+                for item in value:
+                    if isinstance(item, dict):
+                        parts = [f"{k}: {v}" for k, v in item.items()
+                                 if v is not None and v != ""]
+                        if parts:
+                            lines.append("  - " + " | ".join(parts))
+                    else:
+                        lines.append(f"  - {item}")
+                lines.append("")
+            elif isinstance(value, dict) and value:
+                lines.append(f"{key.replace('_', ' ').title()}:")
+                for k, v in value.items():
+                    if v is not None and v != "":
+                        lines.append(f"  {k}: {v}")
+                lines.append("")
 
     return "\n".join(lines)
 

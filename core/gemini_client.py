@@ -16,6 +16,7 @@ from config import (
     AUDIO_RATE, LIVE_INPUT_RATE,
     VAD_PREFIX_PADDING_MS, INACTIVITY_TIMEOUT, READY_PHRASE, ENABLE_READY_PHRASE,
     LIVE_TOOL_RESUME_TIMEOUT_SECONDS,
+    ENABLE_MANUAL_VAD, AUDIO_ENERGY_THRESHOLD,
 )
 import json
 from core.agent_tools import AgentToolExecutor
@@ -56,6 +57,8 @@ class GeminiLiveClient:
         self._tool_resume_pending_ids: list[str] = []
         self._tool_resume_first_model_turn_logged = False
         self._tool_resume_first_audio_logged = False
+        self._manual_speech_active = False
+        self._manual_silence_chunks = 0
         
         # Instructions will be loaded asynchronously before start
         self.instructions = ""
@@ -133,8 +136,13 @@ class GeminiLiveClient:
         self._tool_resume_pending_ids = []
         self._tool_resume_first_model_turn_logged = False
         self._tool_resume_first_audio_logged = False
+        self._manual_speech_active = False
+        self._manual_silence_chunks = 0
 
     async def _mark_model_response_started(self, session):
+        if ENABLE_MANUAL_VAD and self._manual_speech_active:
+            await session.send_realtime_input(activity_end=types.ActivityEnd())
+            self._manual_speech_active = False
         if not self.audio_io.is_receiving_response:
             self.audio_io.clear_mic_queue()
             if self._input_audio_active and not self._input_audio_stream_ended:
@@ -304,10 +312,11 @@ class GeminiLiveClient:
             return exc
         if isinstance(exc, genai_errors.APIError):
             status = getattr(exc, "status", None)
+            code = getattr(exc, "code", None)
             if status in {400, 401, 403, 404, 1008}:
                 return FatalAPIError(f"Fatal Gemini API error ({status}): {exc}")
-            if status in {408, 429, 500, 502, 503, 504, 1006, 1011}:
-                return RecoverableConnectionError(f"Temporary Gemini API error ({status}): {exc}")
+            if status in {408, 429, 500, 502, 503, 504, 1006, 1011} or code in {1006, 1011} or "1006" in str(exc) or "1011" in str(exc):
+                return RecoverableConnectionError(f"Temporary Gemini API error ({status or code}): {exc}")
             return RealtimeAPIError(f"Unhandled Gemini API error ({status}): {exc}")
         if isinstance(exc, (TimeoutError, OSError, ConnectionError, ConnectionClosedError)):
             return RecoverableConnectionError(f"Gemini Live network error: {exc}")
@@ -359,7 +368,7 @@ class GeminiLiveClient:
             input_audio_transcription=types.AudioTranscriptionConfig(),
             output_audio_transcription=types.AudioTranscriptionConfig(),
             realtime_input_config=types.RealtimeInputConfig(
-                automatic_activity_detection=vad_config
+                automatic_activity_detection=None if ENABLE_MANUAL_VAD else vad_config
             )
         )
 
@@ -441,13 +450,33 @@ class GeminiLiveClient:
         while self.is_running:
             try:
                 audio_data = await self.audio_io.mic_queue.get()
-                if self.audio_io.is_receiving_response:
-                    logger.debug("[SendLoop] skip chunk: is_receiving_response=True")
-                    continue
+                # Barge-in support: do NOT block on is_receiving_response
+                # if self.audio_io.is_receiving_response:
+                #     logger.debug("[SendLoop] skip chunk: is_receiving_response=True")
+                #     continue
                 if self.audio_io.is_playing_audio:
                     logger.debug("[SendLoop] skip chunk: is_playing_audio=True")
                     continue
-                
+
+                rms = audioop.rms(audio_data, 2)
+                is_speech = rms > AUDIO_ENERGY_THRESHOLD
+                if is_speech:
+                    self.last_activity_time = asyncio.get_running_loop().time()
+
+                if ENABLE_MANUAL_VAD:
+                    if is_speech:
+                        self._manual_silence_chunks = 0
+                        if not self._manual_speech_active:
+                            await session.send_realtime_input(activity_start=types.ActivityStart())
+                            self._manual_speech_active = True
+                    else:
+                        if self._manual_speech_active:
+                            self._manual_silence_chunks += 1
+                            silence_threshold = int(VAD_SILENCE_DURATION_MS / 1000 * 10)
+                            if self._manual_silence_chunks >= silence_threshold:
+                                await session.send_realtime_input(activity_end=types.ActivityEnd())
+                                self._manual_speech_active = False
+
                 if AUDIO_RATE != LIVE_INPUT_RATE:
                     audio_data, self._resample_state = audioop.ratecv(
                         audio_data,
@@ -534,6 +563,7 @@ class GeminiLiveClient:
                                 self._current_user_transcript,
                                 transcription.text,
                             )
+                        self.last_activity_time = asyncio.get_running_loop().time()
                         if transcription.finished and self._current_user_transcript:
                             self._flush_user_transcript()
 

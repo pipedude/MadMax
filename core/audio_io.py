@@ -207,8 +207,11 @@ class AudioIO:
                 break
 
     def clear_speaker_queue(self):
-        with self.speaker_queue.mutex:
-            self.speaker_queue.queue.clear()
+        while not self.speaker_queue.empty():
+            try:
+                self.speaker_queue.get_nowait()
+            except queue.Empty:
+                break
 
     def clear_mic_queue(self):
         while not self.mic_queue.empty():

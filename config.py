@@ -56,3 +56,11 @@ POST_SESSION_TASK_TIMEOUT_SECONDS = int(
         str(max(NON_LIVE_LLM_TIMEOUT_SECONDS + 5, 1)),
     )
 )
+
+# ==========================================
+# MANUAL VAD (for testing)
+# ==========================================
+ENABLE_MANUAL_VAD = os.getenv("ENABLE_MANUAL_VAD", "false").lower() in {"1", "true", "yes", "on"}
+
+# Local energy threshold for speech detection (RMS of 16-bit PCM)
+AUDIO_ENERGY_THRESHOLD = int(os.getenv("AUDIO_ENERGY_THRESHOLD", "500"))
