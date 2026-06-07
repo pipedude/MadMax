@@ -140,16 +140,20 @@ class GeminiLiveClient:
         self._manual_silence_chunks = 0
 
     async def _mark_model_response_started(self, session):
-        if ENABLE_MANUAL_VAD and self._manual_speech_active:
-            await session.send_realtime_input(activity_end=types.ActivityEnd())
-            self._manual_speech_active = False
-        if not self.audio_io.is_receiving_response:
+        was_not_receiving = not self.audio_io.is_receiving_response
+        self.audio_io.is_receiving_response = True
+        if was_not_receiving:
             self.audio_io.clear_mic_queue()
-            if self._input_audio_active and not self._input_audio_stream_ended:
+            if ENABLE_MANUAL_VAD:
+                if self._manual_speech_active:
+                    await session.send_realtime_input(activity_end=types.ActivityEnd())
+                    self._manual_speech_active = False
+                    self._manual_silence_chunks = 0
+                    logger.debug("[Manual VAD] activity_end (model started responding)")
+            elif self._input_audio_active and not self._input_audio_stream_ended:
                 await session.send_realtime_input(audio_stream_end=True)
                 self._input_audio_active = False
                 self._input_audio_stream_ended = True
-        self.audio_io.is_receiving_response = True
         self.last_activity_time = asyncio.get_running_loop().time()
 
     def _mark_model_response_finished(self):
