@@ -9,7 +9,6 @@ help.md
 agent_instructions_old.md
 gemini_docs/
 live_api_docs/
-agent_files/
 
 # Backup files
 *.bak
