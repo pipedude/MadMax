@@ -185,11 +185,6 @@ class GeminiLiveClient:
         if not text or not AGENT_FILES_DIR:
             return
 
-        match = re.search(r"([^\s,;]+\.(?:jpg|jpeg|png|gif|webp))\b", text, re.IGNORECASE)
-        if not match:
-            return
-
-        raw_name = match.group(1)
         base_dir = Path(AGENT_FILES_DIR).resolve()
         if not base_dir.exists():
             return
@@ -200,24 +195,57 @@ class GeminiLiveClient:
             except (OSError, ValueError):
                 return False
 
-        exact = (base_dir / raw_name).resolve()
-        if not _is_inside(exact):
-            return
-
+        # 1. Try explicit filename with extension first
+        match = re.search(r"([^\s,;]+\.(?:jpg|jpeg|png|gif|webp))\b", text, re.IGNORECASE)
         target = None
-        if exact.exists():
-            target = exact
+        if match:
+            raw_name = match.group(1)
+            exact = (base_dir / raw_name).resolve()
+            if _is_inside(exact):
+                if exact.exists():
+                    target = exact
+                else:
+                    stem = Path(raw_name).stem.lower()
+                    for f in base_dir.iterdir():
+                        if f.is_file() and f.suffix.lower() in (".jpg", ".jpeg", ".png", ".gif", ".webp"):
+                            if stem in f.stem.lower():
+                                target = f
+                                break
+            if not target:
+                await session.send_realtime_input(
+                    text=f"Не нашёл файл {raw_name} в папке agent_files."
+                )
+                return
         else:
-            stem = Path(raw_name).stem
+            # 2. No explicit extension — check if user mentioned a file stem
+            # Require trigger words to avoid false positives on normal words
+            text_lower = text.lower()
+            trigger_words = (
+                "посмотри", "открой", "покажи", "скинь", "фото", "фоточк",
+                "картинк", "изображени", "файл", "look at", "open", "show",
+                "image", "photo", "picture", "file", "send", "photo",
+            )
+            has_trigger = any(tw in text_lower for tw in trigger_words)
+            if not has_trigger:
+                return
+
+            # Search for any file stem that appears in the text
             for f in base_dir.iterdir():
-                if f.is_file() and stem.lower() in f.name.lower():
+                if not f.is_file():
+                    continue
+                if f.suffix.lower() not in (".jpg", ".jpeg", ".png", ".gif", ".webp"):
+                    continue
+                stem = f.stem.lower()
+                # Also check simplified version (no hyphens/underscores)
+                simplified = re.sub(r"[-_]", "", stem)
+                text_simplified = re.sub(r"[-_]", "", text_lower)
+                if stem in text_lower or simplified in text_simplified:
                     target = f
                     break
+            if not target:
+                return
 
         if not target or not target.exists():
-            await session.send_realtime_input(
-                text=f"Не нашёл файл {raw_name} в папке agent_files."
-            )
             return
 
         # dedup: не слать одно и то же чаще чем раз в 5 сек
@@ -629,9 +657,9 @@ class GeminiLiveClient:
                                 self._current_user_transcript,
                                 transcription.text,
                             )
-                            await self._try_send_image(session, transcription.text)
                         self.last_activity_time = asyncio.get_running_loop().time()
                         if transcription.finished and self._current_user_transcript:
+                            await self._try_send_image(session, self._current_user_transcript)
                             self._flush_user_transcript()
 
                     # 2. Process agent response audio and transcription
