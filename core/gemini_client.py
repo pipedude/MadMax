@@ -1,6 +1,8 @@
 import asyncio
 import audioop
+import fnmatch
 import logging
+import re
 import time
 from pathlib import Path
 
@@ -17,6 +19,7 @@ from config import (
     VAD_PREFIX_PADDING_MS, INACTIVITY_TIMEOUT, READY_PHRASE, ENABLE_READY_PHRASE,
     LIVE_TOOL_RESUME_TIMEOUT_SECONDS,
     ENABLE_MANUAL_VAD, AUDIO_ENERGY_THRESHOLD,
+    AGENT_FILES_DIR,
 )
 import json
 from core.agent_tools import AgentToolExecutor
@@ -138,18 +141,24 @@ class GeminiLiveClient:
         self._tool_resume_first_audio_logged = False
         self._manual_speech_active = False
         self._manual_silence_chunks = 0
+        self._last_image_sent_name = None
+        self._last_image_sent_time = 0.0
 
     async def _mark_model_response_started(self, session):
-        if ENABLE_MANUAL_VAD and self._manual_speech_active:
-            await session.send_realtime_input(activity_end=types.ActivityEnd())
-            self._manual_speech_active = False
-        if not self.audio_io.is_receiving_response:
+        was_not_receiving = not self.audio_io.is_receiving_response
+        self.audio_io.is_receiving_response = True
+        if was_not_receiving:
             self.audio_io.clear_mic_queue()
-            if self._input_audio_active and not self._input_audio_stream_ended:
+            if ENABLE_MANUAL_VAD:
+                if self._manual_speech_active:
+                    await session.send_realtime_input(activity_end=types.ActivityEnd())
+                    self._manual_speech_active = False
+                    self._manual_silence_chunks = 0
+                    logger.debug("[Manual VAD] activity_end (model started responding)")
+            elif self._input_audio_active and not self._input_audio_stream_ended:
                 await session.send_realtime_input(audio_stream_end=True)
                 self._input_audio_active = False
                 self._input_audio_stream_ended = True
-        self.audio_io.is_receiving_response = True
         self.last_activity_time = asyncio.get_running_loop().time()
 
     def _mark_model_response_finished(self):
@@ -171,6 +180,63 @@ class GeminiLiveClient:
             self.session_transcript_logger.log_agent_message(text)
             self.last_activity_time = asyncio.get_running_loop().time()
         self._current_agent_transcript = ""
+
+    async def _try_send_image(self, session, text: str) -> None:
+        if not text or not AGENT_FILES_DIR:
+            return
+
+        match = re.search(r"([^\s,;]+\.(?:jpg|jpeg|png|gif|webp))\b", text, re.IGNORECASE)
+        if not match:
+            return
+
+        raw_name = match.group(1)
+        base_dir = Path(AGENT_FILES_DIR).resolve()
+        if not base_dir.exists():
+            return
+
+        def _is_inside(path: Path) -> bool:
+            try:
+                return str(path.resolve()).startswith(str(base_dir) + "/")
+            except (OSError, ValueError):
+                return False
+
+        exact = (base_dir / raw_name).resolve()
+        if not _is_inside(exact):
+            return
+
+        target = None
+        if exact.exists():
+            target = exact
+        else:
+            stem = Path(raw_name).stem
+            for f in base_dir.iterdir():
+                if f.is_file() and stem.lower() in f.name.lower():
+                    target = f
+                    break
+
+        if not target or not target.exists():
+            await session.send_realtime_input(
+                text=f"Не нашёл файл {raw_name} в папке agent_files."
+            )
+            return
+
+        # dedup: не слать одно и то же чаще чем раз в 5 сек
+        now = time.monotonic()
+        if self._last_image_sent_name == target.name and (now - self._last_image_sent_time) < 5.0:
+            return
+
+        mime_map = {
+            ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+            ".png": "image/png", ".gif": "image/gif", ".webp": "image/webp",
+        }
+        mime = mime_map.get(target.suffix.lower(), "image/jpeg")
+
+        data = target.read_bytes()
+        await session.send_realtime_input(
+            video=types.Blob(data=data, mime_type=mime)
+        )
+        self._last_image_sent_name = target.name
+        self._last_image_sent_time = now
 
     def _merge_transcript_chunk(self, current_text: str, incoming_text: str) -> str:
         current_text = current_text.strip()
@@ -563,6 +629,7 @@ class GeminiLiveClient:
                                 self._current_user_transcript,
                                 transcription.text,
                             )
+                            await self._try_send_image(session, transcription.text)
                         self.last_activity_time = asyncio.get_running_loop().time()
                         if transcription.finished and self._current_user_transcript:
                             self._flush_user_transcript()

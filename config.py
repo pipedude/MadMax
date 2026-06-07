@@ -64,3 +64,8 @@ ENABLE_MANUAL_VAD = os.getenv("ENABLE_MANUAL_VAD", "false").lower() in {"1", "tr
 
 # Local energy threshold for speech detection (RMS of 16-bit PCM)
 AUDIO_ENERGY_THRESHOLD = int(os.getenv("AUDIO_ENERGY_THRESHOLD", "500"))
+
+# ==========================================
+# AGENT FILES (IMAGES)
+# ==========================================
+AGENT_FILES_DIR = os.getenv("AGENT_FILES_DIR", "./agent_files/")
